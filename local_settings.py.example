@@ -1,0 +1,27 @@
+"""Example per-deployment overrides for the Starlink agent.
+
+Copy this file to ``local_settings.py`` (which is gitignored) and fill
+in your tenant's values. The bottom of ``settings.py`` does
+``from local_settings import *`` so anything you assign here overrides
+the matching name in ``settings.py``.
+
+REQUIRED for a fresh install: ``TB_PROVISION_KEY`` and
+``TB_PROVISION_SECRET``. Without them, the agent logs an error on
+first boot and won't onboard to ThingsBoard. An already-provisioned
+unit (one with a ``tb_token`` in ``~/.pl/config.json``) keeps running
+without them — the keys are only used the first time.
+
+Most other deployment knobs live in ``~/.pl/config.json`` (Peplink
+router IP / username / password, telemetry interval, retention) — edit
+that file or use the on-device Settings screen rather than overriding
+them here.
+"""
+
+# === ThingsBoard provisioning (REQUIRED for fresh installs) =================
+# Generate fresh values for each tenant under TB's "Device Provisioning"
+# tile. Same key/secret is reused across every device in the same
+# tenant; rotating it invalidates *every* unit's ability to onboard
+# until they're updated.
+TB_PROVISION_KEY    = "REPLACE_WITH_TENANT_KEY"
+TB_PROVISION_SECRET = "REPLACE_WITH_TENANT_SECRET"
+# TB_SERVER_URL       = "https://tb.your-domain.example"

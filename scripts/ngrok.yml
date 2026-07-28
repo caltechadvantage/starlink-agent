@@ -1,0 +1,33 @@
+version: "3"
+agent:
+    authtoken: <YOUR_NGROK_AUTHTOKEN>
+
+# Example for device prefix "rpi-demo". setup_ngrok.sh regenerates this file
+# from the prefix you supply (or DTS_NGROK_PREFIX in non-interactive mode).
+endpoints:
+  # Web terminal (ttyd) — browser shell, mirrors the OpenWrt "-shell" tunnel
+  - name: ttyd
+    url: https://rpi-demo-shell.ngrok.gigabonding.com
+    upstream:
+      url: http://127.0.0.1:7681
+
+  # Cockpit web admin — services, logs, terminal, metrics
+  # Requires cockpit configured for AllowUnencrypted (see setup_ngrok.sh)
+  - name: cockpit
+    url: https://rpi-demo-admin.ngrok.gigabonding.com
+    upstream:
+      url: http://127.0.0.1:9090
+
+  # noVNC — view/control the kiosk screen in a browser (websockify on 6080)
+  # NOTE: capturing an eglfs framebuffer needs extra work — see the setup notes.
+  - name: novnc
+    url: https://rpi-demo-screen.ngrok.gigabonding.com
+    upstream:
+      url: http://127.0.0.1:6080
+
+  # SSH over a TCP endpoint. A *reserved* TCP address gives a stable host:port;
+  # without a reservation ngrok assigns a random one on each start.
+  - name: ssh
+    url: tcp://1.tcp.ngrok.io:12345
+    upstream:
+      url: tcp://127.0.0.1:22
