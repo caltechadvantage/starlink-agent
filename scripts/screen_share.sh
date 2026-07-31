@@ -23,8 +23,13 @@ mkdir -p "$HOME/.pl"
 # wayvnc on a unix socket that a plain "pgrep -x wayvnc" collides with.
 if ! pgrep -f "wayvnc.*127.0.0.1 5900" >/dev/null 2>&1; then
     out="$(wlr-randr 2>/dev/null | grep -iE '^[[:alnum:]-]+ ' | awk '{print $1}' | grep -i DSI | head -1)"
-    echo "$(date) starting wayvnc output=${out:-auto}" >>"$LOG"
-    wayvnc ${out:+--output="$out"} 127.0.0.1 5900 >>"$LOG" 2>&1 &
+    # Render the cursor into the video stream so it shows in noVNC. On a
+    # touch-only kiosk the default client-side cursor is empty, so the mirror
+    # shows no pointer. Guard on support so an older wayvnc still starts.
+    cursor=""
+    wayvnc --help 2>&1 | grep -q -- '--render-cursor' && cursor="--render-cursor"
+    echo "$(date) starting wayvnc output=${out:-auto} cursor=${cursor:-off}" >>"$LOG"
+    wayvnc $cursor ${out:+--output="$out"} 127.0.0.1 5900 >>"$LOG" 2>&1 &
 fi
 
 # Bridge noVNC (browser, 6080) -> VNC (5900); both localhost, ngrok adds TLS.

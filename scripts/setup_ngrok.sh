@@ -159,7 +159,7 @@ EOF
 # touchscreen) over VNC -> noVNC on 6080. Runs in the user's session so it has
 # DISPLAY/XAUTHORITY; see scripts/screen_share.sh.
 install_screen_autostart() {
-    local repo_dir autostart_dir
+    local repo_dir autostart_dir labwc_env theme t
     repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
     autostart_dir="$APP_HOME/.config/autostart"
     mkdir -p "$autostart_dir"
@@ -172,6 +172,22 @@ X-GNOME-Autostart-enabled=true
 EOF
     chown -R "$APP_USER":"$APP_USER" "$autostart_dir"
     ok "Screen mirror autostart installed (starts on next login/reboot)"
+
+    # Give labwc a cursor theme so the pointer is visible in the noVNC mirror.
+    # wayvnc renders the cursor into the stream (--render-cursor), but a
+    # touch-only kiosk has no cursor image unless XCURSOR_THEME is set in
+    # labwc's startup env. Idempotent; takes effect on the next reboot.
+    theme=Adwaita
+    for t in Adwaita PiXflat; do
+        [ -d "/usr/share/icons/$t/cursors" ] && { theme="$t"; break; }
+    done
+    labwc_env="$APP_HOME/.config/labwc/environment"
+    mkdir -p "$(dirname "$labwc_env")"
+    touch "$labwc_env"
+    sed -i '/^XCURSOR_/d' "$labwc_env"
+    printf 'XCURSOR_THEME=%s\nXCURSOR_SIZE=24\n' "$theme" >> "$labwc_env"
+    chown -R "$APP_USER":"$APP_USER" "$APP_HOME/.config/labwc"
+    ok "Cursor theme ($theme) set for the screen mirror"
 }
 
 # --- Step 4: write ngrok.yml --------------------------------------------------
