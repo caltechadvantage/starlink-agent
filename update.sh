@@ -29,6 +29,26 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$log_file"; }
 err()   { echo -e "${RED}[ERROR]${NC} $1"  | tee -a "$log_file"; }
 step()  { echo -e "\n${CYAN}>>> $1${NC}\n" | tee -a "$log_file"; }
 
+# ---- Dashboard status reporter ----------------------------------------------
+# Publish update progress straight to ThingsBoard's HTTP telemetry endpoint.
+# Not routed through the python agent: this script restarts/reboots the unit,
+# so the agent is about to go away. Silent no-op on a unit with no token.
+TB_URL="$(python3 -c 'import sys; sys.path.insert(0,"'"$cur_dir"'"); from settings import TB_SERVER_URL; print(TB_SERVER_URL)' 2>/dev/null)"
+TB_TOKEN="$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.pl/config.json"))).get("tb_token",""))' 2>/dev/null)"
+
+publish_status() {
+    [ -z "${TB_URL:-}" ] && return 0
+    [ -z "${TB_TOKEN:-}" ] && return 0
+    curl -fsS -m 5 -X POST -H 'Content-Type: application/json' \
+        -d "$1" "${TB_URL}/api/v1/${TB_TOKEN}/telemetry" >/dev/null 2>&1 || true
+}
+
+# Report a failure to the dashboard, then exit with the given code.
+fail() {
+    publish_status "{\"update_status\":\"failed\",\"update_error\":\"$1\"}"
+    exit "$2"
+}
+
 info "DTS Router Monitor update started $(date '+%Y-%m-%d %H:%M:%S')"
 info "Working directory: $cur_dir"
 
@@ -45,6 +65,7 @@ fi
 # private and a deployed unit has no credentials for it. Pass a branch, tag,
 # or commit as $1 to pin a build (default main).
 step "Step 1: Downloading latest agent code"
+publish_status '{"update_status":"pulling"}'
 DIST_REPO="${DTS_DIST_REPO:-caltechadvantage/starlink-agent}"
 target="${1:-main}"
 ver_before="$(cat "$cur_dir/VERSION" 2>/dev/null || echo unknown)"
@@ -57,12 +78,12 @@ trap 'rm -rf "$tmp_tgz" "$tmp_dir"' EXIT
 dl_url="https://codeload.github.com/${DIST_REPO}/tar.gz/${target}"
 info "Fetching ${dl_url}"
 curl -fsSL --max-time 300 -o "$tmp_tgz" "$dl_url" >>"$log_file" 2>&1 \
-    || { err "download failed ($dl_url). Check $log_file."; exit 2; }
+    || { err "download failed ($dl_url). Check $log_file."; fail download_failed 2; }
 tar xzf "$tmp_tgz" -C "$tmp_dir" >>"$log_file" 2>&1 \
-    || { err "could not extract the archive."; exit 2; }
+    || { err "could not extract the archive."; fail extract_failed 2; }
 # codeload unpacks to <repo>-<ref>; glob it, since a tag ref drops the "v".
 cp -r "$(echo "$tmp_dir"/*/)". "$cur_dir/" >>"$log_file" 2>&1 \
-    || { err "failed to copy the new agent into $cur_dir."; exit 2; }
+    || { err "failed to copy the new agent into $cur_dir."; fail copy_failed 2; }
 
 ver_after="$(cat "$cur_dir/VERSION" 2>/dev/null || echo unknown)"
 if [ "$ver_before" = "$ver_after" ]; then
@@ -77,7 +98,7 @@ if sudo pip3 install --break-system-packages -r "$cur_dir/requirements.txt" >>"$
     ok "requirements.txt is satisfied"
 else
     err "pip install failed. Check $log_file."
-    exit 3
+    fail pip_install_failed 3
 fi
 
 # --- Step 3: compiled UI ------------------------------------------------------
@@ -145,5 +166,16 @@ fi
 step "Update complete"
 info "Code: $ver_before -> $ver_after"
 info "Log file: $log_file"
-ok   "REBOOT THE PI to fully reload the touchscreen agent:  sudo reboot"
+publish_status "{\"update_status\":\"completed\",\"update_new_version\":\"${ver_after}\"}"
+
+# The touchscreen agent is launched by the desktop autostart, not systemd, so
+# only a reboot loads new Python code. Dashboard-triggered updates set
+# DTS_UPDATE_REBOOT=1 and reboot here; a manual run just prints the reminder.
+if [ "${DTS_UPDATE_REBOOT:-0}" = "1" ]; then
+    ok "Rebooting to load the new agent..."
+    sleep 3          # let the telemetry frame flush before we go down
+    sudo reboot
+else
+    ok "REBOOT THE PI to fully reload the touchscreen agent:  sudo reboot"
+fi
 exit 0
