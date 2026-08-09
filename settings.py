@@ -24,7 +24,7 @@ if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w") as jp:
         json.dump(DEFAULT_CONFIG, jp, indent=2)
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 
 INIT_SCREEN = "overview"
 API_TIMEOUT = 5
