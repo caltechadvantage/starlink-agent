@@ -17,6 +17,12 @@
 set -u
 set -o pipefail
 
+# Step 5 restarts ttyd. When this script is run from the ttyd web shell, that
+# tears down the terminal it is attached to and the shell would be killed by
+# SIGHUP before reporting completion, leaving the dashboard stuck on the last
+# stage it saw. Ignore HUP so the run finishes either way.
+trap '' HUP
+
 cur_dir="$( cd "$(dirname "$0")" && pwd -P )"
 log_file="${HOME}/.dts-update.log"
 
@@ -148,7 +154,9 @@ fi
 # the end is for. ttyd IS managed by systemd, so cycle it now.
 step "Step 5: Restarting systemd-managed components"
 if systemctl list-unit-files 2>/dev/null | grep -q '^ttyd\.service'; then
-    if sudo systemctl restart ttyd 2>>"$log_file"; then
+    # Output to the log, not the terminal: this restart may be pulling the
+    # terminal out from under us, and writing to a dead tty kills the pipe.
+    if sudo systemctl restart ttyd >>"$log_file" 2>&1; then
         ok "ttyd restarted"
     else
         warn "ttyd restart failed; check journalctl -u ttyd"

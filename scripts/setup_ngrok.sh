@@ -237,7 +237,10 @@ write_config() {
     chown -R "$APP_USER":"$APP_USER" "$(dirname "$NGROK_CONFIG")"
     ok "Config written and owned by $APP_USER"
     echo ""
-    cat "$NGROK_CONFIG"
+    # Print the config for the operator, with the authtoken masked. update.sh
+    # redirects this into ~/.dts-update.log, so printing it in clear would
+    # leave the fleet token sitting in a plaintext file on every device.
+    sed 's/^\([[:space:]]*authtoken:\).*/\1 ****redacted****/' "$NGROK_CONFIG"
 }
 
 main() {
