@@ -18,6 +18,13 @@ APP_HOME="DIR"
 cd "$APP_HOME" || exit 1
 
 RESTART_LOG="$HOME/.pl/agent-restarts.log"
+# The app's stderr. Its logger writes to stdout, which only duplicates
+# starlink.log, but a hard crash says why on stderr: Qt fatal messages,
+# glibc abort text, the interpreter's dying output. Running under screen
+# threw all of that away, which is why the crash on 2026-08-28 could not be
+# attributed afterwards.
+STDERR_LOG="$HOME/.pl/agent-stderr.log"
+STDERR_MAX=2000000
 
 PYVER="$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')"
 
@@ -56,8 +63,18 @@ if [ "$1" = "--supervise" ]; then
     # findable afterwards.
     fails=0
     while true; do
+        # Keep the stderr log bounded. Nothing rotates it, and a crash loop
+        # writing a traceback every five seconds would otherwise fill the
+        # card. Truncating on the way in keeps the newest run intact, which
+        # is the one worth reading.
+        if [ -f "$STDERR_LOG" ] \
+           && [ "$(stat -c %s "$STDERR_LOG" 2>/dev/null || echo 0)" -gt "$STDERR_MAX" ]; then
+            tail -c 200000 "$STDERR_LOG" > "$STDERR_LOG.tmp" 2>/dev/null \
+                && mv "$STDERR_LOG.tmp" "$STDERR_LOG"
+        fi
+        echo "--- $(date '+%Y-%m-%d %H:%M:%S') starting $RUN_TARGET" >> "$STDERR_LOG"
         started=$(date +%s)
-        python3 "$RUN_TARGET"
+        python3 "$RUN_TARGET" 2>> "$STDERR_LOG"
         rc=$?
         ran=$(( $(date +%s) - started ))
         if [ "$ran" -lt 30 ]; then
