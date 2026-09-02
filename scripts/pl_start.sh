@@ -7,9 +7,24 @@
 #
 # A compiled dist ships no .py: main.pyc lives under a per-interpreter dir
 # (py39/py311/py313), since bytecode is not portable across Python minors.
+#
+# Two modes. With no arguments it opens the detached screen session the kiosk
+# lives in and hands off to itself. With --supervise it is already inside that
+# session, and keeps the app running.
+
+SELF="$(readlink -f "$0")"
 
 APP_HOME="DIR"
 cd "$APP_HOME" || exit 1
+
+RESTART_LOG="$HOME/.pl/agent-restarts.log"
+# The app's stderr. Its logger writes to stdout, which only duplicates
+# starlink.log, but a hard crash says why on stderr: Qt fatal messages,
+# glibc abort text, the interpreter's dying output. Running under screen
+# threw all of that away, which is why the crash on 2026-08-28 could not be
+# attributed afterwards.
+STDERR_LOG="$HOME/.pl/agent-stderr.log"
+STDERR_MAX=2000000
 
 PYVER="$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')"
 
@@ -24,13 +39,61 @@ else
     exit 1
 fi
 
+if [ "$1" = "--supervise" ]; then
+    export DISPLAY=:0.0
+    # Source .env so QT_QPA_PLATFORM (xcb, needed for the screen mirror) and
+    # other provisioned vars reach the kiosk. The compiled-dist launcher,
+    # unlike run.sh, has no other place to apply them.
+    if [ -f "$APP_HOME/.env" ]; then
+        set -a
+        . "$APP_HOME/.env"
+        set +a
+    fi
+    export PYTHONPATH="$RUN_PYPATH"
+    mkdir -p "$(dirname "$RESTART_LOG")"
+
+    # main.py catches exceptions on its own main thread and rebuilds the
+    # window in process. That cannot help when the process itself dies: a
+    # segfault, an abort out of Qt, the OOM killer, or anything raised in the
+    # constructor before the event loop is running. Those left the screen
+    # blank until someone power cycled the unit.
+    #
+    # Back off after repeated fast exits so a kit that cannot start at all
+    # does not spin on it, and record every restart so the reason is
+    # findable afterwards.
+    fails=0
+    while true; do
+        # Keep the stderr log bounded. Nothing rotates it, and a crash loop
+        # writing a traceback every five seconds would otherwise fill the
+        # card. Truncating on the way in keeps the newest run intact, which
+        # is the one worth reading.
+        if [ -f "$STDERR_LOG" ] \
+           && [ "$(stat -c %s "$STDERR_LOG" 2>/dev/null || echo 0)" -gt "$STDERR_MAX" ]; then
+            tail -c 200000 "$STDERR_LOG" > "$STDERR_LOG.tmp" 2>/dev/null \
+                && mv "$STDERR_LOG.tmp" "$STDERR_LOG"
+        fi
+        echo "--- $(date '+%Y-%m-%d %H:%M:%S') starting $RUN_TARGET" >> "$STDERR_LOG"
+        started=$(date +%s)
+        python3 "$RUN_TARGET" 2>> "$STDERR_LOG"
+        rc=$?
+        ran=$(( $(date +%s) - started ))
+        if [ "$ran" -lt 30 ]; then
+            fails=$(( fails + 1 ))
+        else
+            fails=0
+        fi
+        if [ "$fails" -ge 5 ]; then
+            delay=60
+        else
+            delay=5
+        fi
+        echo "$(date '+%Y-%m-%d %H:%M:%S') agent exited rc=$rc after ${ran}s," \
+             "consecutive fast exits=$fails, restarting in ${delay}s" \
+             | tee -a "$RESTART_LOG"
+        sleep "$delay"
+    done
+fi
+
 echo "Starting main GUI application ($RUN_TARGET)..."
 screen -mS pl -d
-screen -S pl -X stuff "export DISPLAY=:0.0\\r"
-# Source .env so QT_QPA_PLATFORM (xcb, needed for the screen mirror) and other
-# provisioned vars reach the kiosk. The compiled-dist launcher, unlike run.sh,
-# has no other place to apply them.
-screen -S pl -X stuff "[ -f $APP_HOME/.env ] && set -a && . $APP_HOME/.env && set +a\\r"
-screen -S pl -X stuff "export PYTHONPATH=$RUN_PYPATH\\r"
-screen -S pl -X stuff "cd $APP_HOME\\r"
-screen -S pl -X stuff "python3 $RUN_TARGET\\r"
+screen -S pl -X stuff "bash $SELF --supervise\\r"

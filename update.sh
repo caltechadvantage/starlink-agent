@@ -17,6 +17,12 @@
 set -u
 set -o pipefail
 
+# Step 5 restarts ttyd. When this script is run from the ttyd web shell, that
+# tears down the terminal it is attached to and the shell would be killed by
+# SIGHUP before reporting completion, leaving the dashboard stuck on the last
+# stage it saw. Ignore HUP so the run finishes either way.
+trap '' HUP
+
 cur_dir="$( cd "$(dirname "$0")" && pwd -P )"
 log_file="${HOME}/.dts-update.log"
 
@@ -112,6 +118,23 @@ else
     info "Compiled dist - UI ships prebuilt, nothing to recompile."
 fi
 
+# --- Step 3b: kiosk launcher --------------------------------------------------
+# /opt/pl_start.sh is written by setup.sh and never touched again, so a change
+# to the launcher would otherwise only reach newly provisioned units. Refresh
+# it here with the same substitution setup.sh does. Idempotent; takes effect on
+# the reboot at the end of this script.
+step "Step 3b: Refreshing the kiosk launcher"
+if [ -f "$cur_dir/scripts/pl_start.sh" ]; then
+    if sudo cp "$cur_dir/scripts/pl_start.sh" /opt/pl_start.sh >>"$log_file" 2>&1 \
+       && sudo sed -i -- "s/DIR/${cur_dir////\\/}/g" /opt/pl_start.sh >>"$log_file" 2>&1; then
+        ok "/opt/pl_start.sh refreshed"
+    else
+        warn "could not refresh /opt/pl_start.sh; the kiosk keeps its current launcher"
+    fi
+else
+    info "No scripts/pl_start.sh in this build - leaving the launcher alone."
+fi
+
 # --- Step 4: remote-access install (ttyd + wayvnc + noVNC + ngrok) -----------
 # Re-runs setup_ngrok.sh, which is fully idempotent: apt-installed
 # packages get checked, the ttyd systemd unit is rewritten, ngrok.yml
@@ -148,7 +171,9 @@ fi
 # the end is for. ttyd IS managed by systemd, so cycle it now.
 step "Step 5: Restarting systemd-managed components"
 if systemctl list-unit-files 2>/dev/null | grep -q '^ttyd\.service'; then
-    if sudo systemctl restart ttyd 2>>"$log_file"; then
+    # Output to the log, not the terminal: this restart may be pulling the
+    # terminal out from under us, and writing to a dead tty kills the pipe.
+    if sudo systemctl restart ttyd >>"$log_file" 2>&1; then
         ok "ttyd restarted"
     else
         warn "ttyd restart failed; check journalctl -u ttyd"

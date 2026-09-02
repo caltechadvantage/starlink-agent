@@ -24,13 +24,18 @@ if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w") as jp:
         json.dump(DEFAULT_CONFIG, jp, indent=2)
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.9.0"
 
 INIT_SCREEN = "overview"
 API_TIMEOUT = 5
 APP_DIR = os.path.dirname(os.path.realpath(__file__))
 CRASH_FILE = os.path.join(ROOT_DIR, "crash.dump")
 SCREEN_SAVER_TIME = 30
+# How many polls a dish reading may go unrefreshed before the stats screens
+# stop showing it. Four gives roughly two minutes at the default interval.
+# Reacting to the first miss made them flip between values and "not
+# reachable" while the dish was fine.
+DISH_STALE_AFTER_POLLS = 4
 
 # ThingsBoard provisioning credentials. Source-tracked literal removed
 # in 1.4.0 — the repo is public. Drop them into ~/.pl/local_settings.py
