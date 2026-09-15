@@ -15,29 +15,76 @@
 SELF="$(readlink -f "$0")"
 
 APP_HOME="DIR"
+
+# update.sh swaps releases with two renames: the install to .prev, then the
+# staged release into place. Power lost between them leaves no install, so put
+# the previous one back.
+if [ ! -d "$APP_HOME" ] && [ -d "$APP_HOME.prev" ]; then
+    mv "$APP_HOME.prev" "$APP_HOME"
+fi
 cd "$APP_HOME" || exit 1
 
 RESTART_LOG="$HOME/.pl/agent-restarts.log"
 # The app's stderr. Its logger writes to stdout, which only duplicates
 # starlink.log, but a hard crash says why on stderr: Qt fatal messages,
-# glibc abort text, the interpreter's dying output. Running under screen
-# threw all of that away, which is why the crash on 2026-08-28 could not be
-# attributed afterwards.
+# glibc abort text, the interpreter's dying output.
 STDERR_LOG="$HOME/.pl/agent-stderr.log"
 STDERR_MAX=2000000
+# Written by update.sh when it swaps in a release. A crash loop within
+# ROLLBACK_WINDOW seconds of that puts the previous release back.
+UPDATE_MARKER="$HOME/.pl/update-pending"
+ROLLBACK_WINDOW=1800
 
 PYVER="$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')"
 
-if [ -f main.py ]; then
-    RUN_TARGET="main.py"
-    RUN_PYPATH="$APP_HOME"
-elif [ -f "$PYVER/main.pyc" ]; then
-    RUN_TARGET="$PYVER/main.pyc"
-    RUN_PYPATH="$APP_HOME/$PYVER:$APP_HOME"
-else
-    echo "ERROR: no main.py or $PYVER/main.pyc in $APP_HOME" >&2
-    exit 1
-fi
+pick_target() {
+    if [ -f main.py ]; then
+        RUN_TARGET="main.py"
+        RUN_PYPATH="$APP_HOME"
+    elif [ -f "$PYVER/main.pyc" ]; then
+        RUN_TARGET="$PYVER/main.pyc"
+        RUN_PYPATH="$APP_HOME/$PYVER:$APP_HOME"
+    else
+        echo "ERROR: no main.py or $PYVER/main.pyc in $APP_HOME" >&2
+        return 1
+    fi
+}
+pick_target || exit 1
+
+# Tell the dashboard, so a rollback does not pass for a successful update.
+report_rollback() {
+    url="$(PYTHONPATH="$APP_HOME" python3 -c 'from settings import TB_SERVER_URL; print(TB_SERVER_URL)' 2>/dev/null)"
+    token="$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.pl/config.json"))).get("tb_token",""))' 2>/dev/null)"
+    [ -n "$url" ] && [ -n "$token" ] || return 0
+    curl -fsS -m 5 -X POST -H 'Content-Type: application/json' \
+        -d '{"update_status":"failed","update_error":"kept crashing after the update; rolled back"}' \
+        "$url/api/v1/$token/telemetry" >/dev/null 2>&1 || true
+}
+
+# Put the previous release back when the one update.sh just installed keeps
+# crashing. Only inside the window after an update, so a crash loop days later
+# for some other reason does not quietly downgrade the kit.
+roll_back() {
+    marked="$(cat "$UPDATE_MARKER" 2>/dev/null)"
+    rm -f "$UPDATE_MARKER"
+    case "$marked" in ''|*[!0-9]*) return ;; esac
+    [ $(( $(date +%s) - marked )) -lt "$ROLLBACK_WINDOW" ] || return
+    [ -d "$APP_HOME.prev" ] || return
+    rm -rf "$APP_HOME.failed"
+    mv "$APP_HOME" "$APP_HOME.failed" || return
+    if ! mv "$APP_HOME.prev" "$APP_HOME"; then
+        mv "$APP_HOME.failed" "$APP_HOME"
+        return
+    fi
+    cd "$APP_HOME" || exit 1
+    pick_target || exit 1
+    export PYTHONPATH="$RUN_PYPATH"
+    fails=0
+    echo "$(date '+%Y-%m-%d %H:%M:%S') release kept crashing after the update," \
+         "rolled back to the previous one (failed one kept in $APP_HOME.failed)" \
+         | tee -a "$RESTART_LOG"
+    report_rollback
+}
 
 if [ "$1" = "--supervise" ]; then
     export DISPLAY=:0.0
@@ -81,6 +128,10 @@ if [ "$1" = "--supervise" ]; then
             fails=$(( fails + 1 ))
         else
             fails=0
+            rm -f "$UPDATE_MARKER"
+        fi
+        if [ "$fails" -ge 5 ] && [ -f "$UPDATE_MARKER" ]; then
+            roll_back
         fi
         if [ "$fails" -ge 5 ]; then
             delay=60
