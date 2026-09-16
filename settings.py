@@ -24,7 +24,7 @@ if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w") as jp:
         json.dump(DEFAULT_CONFIG, jp, indent=2)
 
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.12.0"
 
 INIT_SCREEN = "overview"
 API_TIMEOUT = 5
@@ -44,6 +44,12 @@ DISH_STALE_AFTER_POLLS = 4
 TB_PROVISION_KEY    = os.environ.get("TB_PROVISION_KEY")
 TB_PROVISION_SECRET = os.environ.get("TB_PROVISION_SECRET")
 TB_SERVER_URL       = os.environ.get("TB_SERVER_URL", "http://tracker.mobilelinq.com:8080")
+
+# The DTS dashboard. Only used to ask for a new access token when the kit's
+# ThingsBoard device has been deleted and its own token stopped working, so
+# the kit does not need a person in front of it to come back. See
+# utils/recovery.py.
+DTS_DASHBOARD_URL   = os.environ.get("DTS_DASHBOARD_URL", "https://dashboard.mobilelinq.com")
 
 # Per-deployment overrides win, same pattern as the openwrt agent.
 try:
