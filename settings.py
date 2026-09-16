@@ -45,6 +45,12 @@ TB_PROVISION_KEY    = os.environ.get("TB_PROVISION_KEY")
 TB_PROVISION_SECRET = os.environ.get("TB_PROVISION_SECRET")
 TB_SERVER_URL       = os.environ.get("TB_SERVER_URL", "http://tracker.mobilelinq.com:8080")
 
+# The DTS dashboard. Only used to ask for a new access token when the kit's
+# ThingsBoard device has been deleted and its own token stopped working, so
+# the kit does not need a person in front of it to come back. See
+# utils/recovery.py.
+DTS_DASHBOARD_URL   = os.environ.get("DTS_DASHBOARD_URL", "https://dashboard.mobilelinq.com")
+
 # Per-deployment overrides win, same pattern as the openwrt agent.
 try:
     from local_settings import *  # noqa: F401,F403
